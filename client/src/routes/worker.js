@@ -1,11 +1,12 @@
 const workercode = () => {
   let arr = [];
   onmessage = (event) => {
-    if (event.data == "download") {
+    if (event.data == "download" ) {
       let blob = new Blob(arr);
       console.log("blob--->",blob);
       arr = [];
       postMessage(blob);
+      blob=null;
       
     } else {
        

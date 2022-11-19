@@ -28,76 +28,68 @@ const Room = (props) => {
   const [full, setFull] = useState(false);
 
   useEffect(() => {
-    navigator.mediaDevices
-      .getUserMedia({ audio: true, video: true })
-      .then((stream) => {
-        userVideo.current.srcObject = stream;
-        userStream.current = stream;
+    navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then((stream) => {
+      userVideo.current.srcObject = stream;
+      userStream.current = stream;
 
-        userStream.current.getTracks()[0].enabled = false;
+      userStream.current.getTracks()[0].enabled = false;
 
-        socketRef.current = io.connect("/");
-        socketRef.current.emit("join room", props.match.params.roomID);
+      socketRef.current = io.connect("/");
+      socketRef.current.emit("join room", props.match.params.roomID);
 
-        socketRef.current.on("other user", (userID) => {
-          callUser(userID);
-          otherUser.current = userID;
-        });
-
-        socketRef.current.on("user joined", (userID) => {
-          otherUser.current = userID;
-        });
-
-        socketRef.current.on("room full", () => {
-          setFull(!full);
-          window.location.href = "https://intense-dawn-13733.herokuapp.com/";
-        });
-
-        socketRef.current.on("offer", handleRecieveCall);
-
-        socketRef.current.on("answer", handleAnswer);
-
-        socketRef.current.on("ice-candidate", handleNewICECandidateMsg);
-
-        //add
-        socketRef.current.on("user left", () => {
-          if (peerRef.current) {
-            peerRef.current.ontrack = null;
-            peerRef.current.onicecandidate = null;
-            peerRef.current.close();
-            peerRef.current = null;
-          }
-
-          setPeerJoined(false);
-          console.log("user left called");
-
-          senders.current = [];
-        });
-        //add
-
-        let leaveRoomButton = document.getElementById("leaveButton");
-        leaveRoomButton.addEventListener("click", function () {
-          let obj = {
-            roomID: props.match.params.roomID,
-            otherUser: otherUser.current,
-          };
-          socketRef.current.emit("leave room", obj);
-          window.location.href = "https://intense-dawn-13733.herokuapp.com/";
-        });
-
-        socketRef.current.on("room full", () => {});
+      socketRef.current.on("other user", (userID) => {
+        callUser(userID);
+        otherUser.current = userID;
       });
+
+      socketRef.current.on("user joined", (userID) => {
+        otherUser.current = userID;
+      });
+
+      socketRef.current.on("room full", () => {
+        setFull(!full);
+        window.location.href = "https://intense-dawn-13733.herokuapp.com/";
+      });
+
+      socketRef.current.on("offer", handleRecieveCall);
+
+      socketRef.current.on("answer", handleAnswer);
+
+      socketRef.current.on("ice-candidate", handleNewICECandidateMsg);
+
+      //add
+      socketRef.current.on("user left", () => {
+        if (peerRef.current) {
+          peerRef.current.ontrack = null;
+          peerRef.current.onicecandidate = null;
+          peerRef.current.close();
+          peerRef.current = null;
+        }
+
+        setPeerJoined(false);
+        console.log("user left called");
+
+        senders.current = [];
+      });
+      //add
+
+      let leaveRoomButton = document.getElementById("leaveButton");
+      leaveRoomButton.addEventListener("click", function () {
+        let obj = {
+          roomID: props.match.params.roomID,
+          otherUser: otherUser.current,
+        };
+        socketRef.current.emit("leave room", obj);
+        window.location.href = "https://intense-dawn-13733.herokuapp.com/";
+      });
+
+      socketRef.current.on("room full", () => {});
+    });
   }, []);
 
   function callUser(userID) {
     peerRef.current = createPeer(userID);
-    userStream.current
-      .getTracks()
-      .forEach((track) =>
-        senders.current.push(
-          peerRef.current.addTrack(track, userStream.current)
-        )
-      );
+    userStream.current.getTracks().forEach((track) => senders.current.push(peerRef.current.addTrack(track, userStream.current)));
 
     //add
     sendChannel.current = peerRef.current.createDataChannel("sendChannel");
@@ -123,14 +115,15 @@ const Room = (props) => {
     }
   }
 
-  function download() {
+  async function download() {
     setGotFile(false);
-    worker.addEventListener("message", (e) => {
+    worker.addEventListener("message", function handle(e) {
       console.log(fileName.current);
       const stream = e.data.stream();
       const fileStream = streamsaver.createWriteStream(fileName.current);
       stream.pipeTo(fileStream);
-    });
+      worker.removeEventListener("message",handle);
+    },{once:true});
     worker.postMessage("download");
   }
 
@@ -201,13 +194,7 @@ const Room = (props) => {
     peerRef.current
       .setRemoteDescription(desc)
       .then(() => {
-        userStream.current
-          .getTracks()
-          .forEach((track) =>
-            senders.current.push(
-              peerRef.current.addTrack(track, userStream.current)
-            )
-          );
+        userStream.current.getTracks().forEach((track) => senders.current.push(peerRef.current.addTrack(track, userStream.current)));
       })
       .then(() => {
         return peerRef.current.createAnswer();
@@ -259,13 +246,9 @@ const Room = (props) => {
 
       console.log("senders.current is: ", senders.current);
 
-      senders.current
-        .find((sender) => sender.track.kind === "video")
-        .replaceTrack(screenTrack);
+      senders.current.find((sender) => sender.track.kind === "video").replaceTrack(screenTrack);
       screenTrack.onended = function () {
-        senders.current
-          .find((sender) => sender.track.kind === "video")
-          .replaceTrack(userStream.current.getTracks()[1]);
+        senders.current.find((sender) => sender.track.kind === "video").replaceTrack(userStream.current.getTracks()[1]);
       };
     });
   }
@@ -320,41 +303,88 @@ const Room = (props) => {
     console.log(file.current);
   }
 
-  function handleSendFile() {
+  async function handleSendFile() {
     console.log(file.current);
     // const stream = file.current.stream();
     // const reader = stream.getReader();
 
-    file.current.arrayBuffer().then((buffer) => {
-      const chunkSize = 256 * 1024; //chunk size 16kb
-      // if(buffer.byteLength<chunkSize)
+    const fileName = file.current.name;
 
-      const send = () => {
-        while (buffer.byteLength) {
-          if (
-            fileChannel.current.bufferedAmount >
-            fileChannel.current.bufferedAmountLowThreshold
-          ) {
-            fileChannel.current.onbufferedamountlow = () => {
-              fileChannel.current.onbufferedamountlow = null;
-              send();
-            };
-            return;
-          }
+    //   const send=async ()=>{
+    //   while(!isFinished){
+    //     // console.log("pppp");
+    //     if (
+    //               fileChannel.current.bufferedAmount >
+    //               fileChannel.current.bufferedAmountLowThreshold
+    //             ) {
+    //               fileChannel.current.onbufferedamountlow = () => {
+    //                 fileChannel.current.onbufferedamountlow = null;
+    //                 send();
+    //               };
+    //               return;
+    //             }
+    //  const {done,value}= await reader.read();
+    //       if(done){
+    //         console.log("done--->", file.current.name);
+    //                 fileChannel.current.send(
+    //                   JSON.stringify({ done: true, fileName: file.current.name })
+    //                 );
+    //                 isFinished=true;
+    //       }
+    //       else{
+    //         console.log("value-->",value?.byteLength);
+    //         fileChannel.current.send(value);
 
-          const chunk = buffer.slice(0, chunkSize);
-          buffer = buffer.slice(chunkSize, buffer.byteLength);
-          // console.log(chunk);
-          fileChannel.current.send(chunk);
-        }
-        console.log("done--->", file.name);
-        fileChannel.current.send(
-          JSON.stringify({ done: true, fileName: file.current.name })
-        );
-      };
+    //       }
+    //   }
+    //   }
+    //   await send()
+    //   console.log("isFinished-->",isFinished);
+    
+    let blobChunk = 1024*1024*2 ;
+    let init=0;
+    const sendBlob = async () => {
+      while (file.current.size>init) {
+        let temp;
+       temp = file.current.slice(init, init+blobChunk);
+        init+=blobChunk;
+        console.log("temp--->", temp);
+        // file.current = file.current.slice(blobChunk, file.current.size);
+        let buffer=await temp.arrayBuffer();
+        // await temp.arrayBuffer().then(async (buffer, fileSize = init) => {
+          const chunkSize = 256 * 1024; //chunk size 16kb
+          
+          // console.log("fileSize-->",fileSize);
+          const send = () => {
+            while (buffer.byteLength) {
+              if (fileChannel.current.bufferedAmount > fileChannel.current.bufferedAmountLowThreshold) {
+               
+                return  new Promise(resolve=>{
+                  fileChannel.current.onbufferedamountlow = async() => {
+                    fileChannel.current.onbufferedamountlow = null;
+                    // console.log("buffffff");
+                    resolve(send());
+                  };
+                });
+              }
 
-      send();
-    });
+              const chunk = buffer.slice(0, chunkSize);
+              buffer = buffer.slice(chunkSize, buffer.byteLength);
+              // console.log(chunk);
+              fileChannel.current.send(chunk);
+            }
+            if (file.current.size<=init) {
+              console.log("done--->", fileName);
+              fileChannel.current.send(JSON.stringify({ done: true, fileName }));
+            }
+          };
+
+          await send();
+        // });
+      }
+    };
+    sendBlob();
+    // file.current=null
 
     // fileChannel.current.bufferedAmountLowThreshold = 65535
     // const send=()=>{
@@ -483,12 +513,7 @@ const Room = (props) => {
           </div>
         )}
 
-        <input
-          value={text}
-          type="text"
-          placeholder="say something..."
-          onChange={handleChange}
-        ></input>
+        <input value={text} type="text" placeholder="say something..." onChange={handleChange}></input>
         <button onClick={sendMessage}>Send</button>
       </div>
     </div>
