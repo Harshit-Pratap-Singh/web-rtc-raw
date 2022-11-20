@@ -16,6 +16,8 @@ const Room = (props) => {
   const fileName = useRef();
   const sendChannel = useRef();
   const file = useRef();
+  const fileStream = useRef();
+  const fileStreamWriter = useRef();
   const [text, setText] = useState("");
   const [messages, setMessages] = useState([]);
   const [gotFile, setGotFile] = useState(false);
@@ -96,7 +98,8 @@ const Room = (props) => {
     sendChannel.current.onmessage = handleReceiveMessage;
 
     fileChannel.current = peerRef.current.createDataChannel("fileChannel");
-    fileChannel.current.onmessage = handleReceiveFile;
+    fileChannel.current.binaryType = "arraybuffer";
+    fileChannel.current.onmessage = helperReceiveFile;
     fileChannel.current.onopen = () => {
       console.log("file channel open");
     };
@@ -104,26 +107,50 @@ const Room = (props) => {
     //add
   }
 
-  function handleReceiveFile(e) {
+  function helperReceiveFile(e) {
+    // console.log("ooooo");
+    if (!fileStream.current && e.data.toString().includes("start")) {
+      fileStream.current = streamsaver.createWriteStream(JSON.parse(e.data).fileName,{size:JSON.parse(e.data).size});
+      console.log("fileStream.current--->", fileStream.current);
+      // alert("jskdhjfhk")
+      console.log(JSON.parse(e.data).fileName);
+      fileStreamWriter.current = fileStream.current.getWriter();
+      console.log("fileStreamWriter.current--->", fileStreamWriter.current);
+      return;
+    }
+  handleReceiveFile(e) 
+    
+  }
+function handleReceiveFile(e) {
     // console.log(e);
     if (e.data.toString().includes("done")) {
       setGotFile(true);
       console.log(e);
+      fileStreamWriter.current.close();
+      fileStream.current = null;
       fileName.current = JSON.parse(e.data).fileName;
     } else {
-      worker.postMessage(e.data);
+      // console.log(e.data);
+       fileStreamWriter.current.write(new Uint8Array(e.data)).catch(e=>{
+        console.log("error",e);
+       })
+      // worker.postMessage(e.data);
     }
   }
 
   async function download() {
     setGotFile(false);
-    worker.addEventListener("message", function handle(e) {
-      console.log(fileName.current);
-      const stream = e.data.stream();
-      const fileStream = streamsaver.createWriteStream(fileName.current);
-      stream.pipeTo(fileStream);
-      worker.removeEventListener("message",handle);
-    },{once:true});
+    worker.addEventListener(
+      "message",
+      function handle(e) {
+        console.log(fileName.current);
+        const stream = e.data.stream();
+        const fileStream = streamsaver.createWriteStream(fileName.current);
+        stream.pipeTo(fileStream);
+        worker.removeEventListener("message", handle);
+      },
+      { once: true }
+    );
     worker.postMessage("download");
   }
 
@@ -182,7 +209,20 @@ const Room = (props) => {
         sendChannel.current.onmessage = handleReceiveMessage;
       } else {
         fileChannel.current = event.channel;
-        fileChannel.current.onmessage = handleReceiveFile;
+        fileChannel.current.binaryType = "arraybuffer";
+        // fileChannel.current.onmessage = (e) => {
+        //   if (e.data.toString().includes("start")) {
+        //     fileStream.current = streamsaver.createWriteStream(JSON.parse(e.data).fileName);
+        //     console.log("fileStream.current--->", fileStream.current);
+        //     // alert("jskdhjfhk")
+        //     console.log(JSON.parse(e.data).fileName);
+        //     fileStreamWriter.current = fileStream.current.getWriter();
+        //     console.log("fileStreamWriter.current--->", fileStreamWriter.current);
+        //     return;
+        //   }
+        //   handleReceiveFile(e);
+        // };
+        fileChannel.current.onmessage=helperReceiveFile;
         fileChannel.current.onopen = () => {
           console.log("file channel open");
         };
@@ -340,46 +380,46 @@ const Room = (props) => {
     //   }
     //   await send()
     //   console.log("isFinished-->",isFinished);
-    
-    let blobChunk = 1024*1024*2 ;
-    let init=0;
+    fileChannel.current.send(JSON.stringify({ start: true, fileName ,size:file.current.size}));
+
+    let blobChunk = 1024 * 1024 * 2;
+    let init = 0;
     const sendBlob = async () => {
-      while (file.current.size>init) {
+      while (file.current.size > init) {
         let temp;
-       temp = file.current.slice(init, init+blobChunk);
-        init+=blobChunk;
+        temp = file.current.slice(init, init + blobChunk);
+        init += blobChunk;
         console.log("temp--->", temp);
         // file.current = file.current.slice(blobChunk, file.current.size);
-        let buffer=await temp.arrayBuffer();
+        let buffer = await temp.arrayBuffer();
         // await temp.arrayBuffer().then(async (buffer, fileSize = init) => {
-          const chunkSize = 256 * 1024; //chunk size 16kb
-          
-          // console.log("fileSize-->",fileSize);
-          const send = () => {
-            while (buffer.byteLength) {
-              if (fileChannel.current.bufferedAmount > fileChannel.current.bufferedAmountLowThreshold) {
-               
-                return  new Promise(resolve=>{
-                  fileChannel.current.onbufferedamountlow = async() => {
-                    fileChannel.current.onbufferedamountlow = null;
-                    // console.log("buffffff");
-                    resolve(send());
-                  };
-                });
-              }
+        const chunkSize = 256 * 1024; //chunk size 16kb
 
-              const chunk = buffer.slice(0, chunkSize);
-              buffer = buffer.slice(chunkSize, buffer.byteLength);
-              // console.log(chunk);
-              fileChannel.current.send(chunk);
+        // console.log("fileSize-->",fileSize);
+        const send = () => {
+          while (buffer.byteLength) {
+            if (fileChannel.current.bufferedAmount > fileChannel.current.bufferedAmountLowThreshold) {
+              return new Promise((resolve) => {
+                fileChannel.current.onbufferedamountlow = async () => {
+                  fileChannel.current.onbufferedamountlow = null;
+                  // console.log("buffffff");
+                  resolve(send());
+                };
+              });
             }
-            if (file.current.size<=init) {
-              console.log("done--->", fileName);
-              fileChannel.current.send(JSON.stringify({ done: true, fileName }));
-            }
-          };
 
-          await send();
+            const chunk = buffer.slice(0, chunkSize);
+            buffer = buffer.slice(chunkSize, buffer.byteLength);
+            // console.log(chunk);
+            fileChannel.current.send(chunk);
+          }
+          if (file.current.size <= init) {
+            console.log("done--->", fileName);
+            fileChannel.current.send(JSON.stringify({ done: true, fileName }));
+          }
+        };
+
+        await send();
         // });
       }
     };
